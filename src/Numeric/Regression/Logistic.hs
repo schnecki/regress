@@ -2,7 +2,9 @@ module Numeric.Regression.Logistic
   (Model, regress) where
 
 import Control.Applicative
+import Data.Foldable
 import Data.Monoid
+import Data.Traversable
 import Numeric.AD
 import Numeric.Regression.Internal
 
