@@ -1,12 +1,12 @@
 module Numeric.Regression.Logistic
   (Model, regress) where
 
-import Control.Applicative
-import Data.Foldable
-import Data.Monoid
-import Data.Traversable
-import Numeric.AD
-import Numeric.Regression.Internal
+import           Control.Applicative
+import           Data.Foldable
+import           Data.Monoid
+import           Data.Traversable
+import           Numeric.AD
+import           Numeric.Regression.Internal
 
 -- | A model using the given @f@ to store parameters of type @a@.
 --   Can be thought of as some kind of vector throughough this
@@ -17,7 +17,7 @@ logit :: Floating a => a -> a
 logit x = 1 / (1 + exp (negate x))
 {-# INLINE logit #-}
 
-logLikelihood :: (Applicative v, Foldable v, Floating a)
+logLikelihood :: (ModelVector v, Applicative v, Foldable v, Floating a)
               => Model v a -- theta vector
               -> a         -- y
               -> v a       -- x vector (observation)
@@ -28,7 +28,7 @@ logLikelihood theta y x =
   where z = theta `dot` x
 {-# INLINE logLikelihood #-}
 
-totalLogLikelihood :: (Applicative v, Foldable v, Applicative f, Foldable f, Floating a)
+totalLogLikelihood :: (ModelVector v, Applicative v, Foldable v, Applicative f, Foldable f, Floating a)
                    => a -- delta
                    -> Model v a
                    -> f a
@@ -70,7 +70,7 @@ totalLogLikelihood delta theta ys xs =
 -- approxs' :: [Model [] Double]
 -- approxs' = learn 0.1 ys_ex xs_ex t0
 -- @
-regress :: (Traversable v, Applicative v, Foldable f, Applicative f, Ord a, Floating a)
+regress :: (ModelVector f, ModelVector v, Traversable v, Applicative v, Foldable f, Applicative f, Ord a, Floating a)
         => a           -- ^ learning rate
         -> f a         -- ^ expect prediction for each observation
         -> f (v a)     -- ^ input data for each observation

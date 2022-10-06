@@ -1,12 +1,22 @@
+{-# LANGUAGE InstanceSigs        #-}
+{-# LANGUAGE ScopedTypeVariables #-}
 module Numeric.Regression.Linear
-  (Model, compute, regress) where
+  ( Model
+  , cost
+  , totalCost
+  , compute
+  , regress
+  , regressConjugate
+  , regressStochastic
+  ) where
 
-import Control.Applicative
-import Data.Foldable
-import Data.Monoid
-import Data.Traversable
-import Numeric.AD
-import Numeric.Regression.Internal
+import           Control.Applicative
+import           Data.Foldable
+import           Data.Monoid
+import           Data.Traversable
+import           Numeric.AD
+import           Numeric.Regression.Internal
+
 
 -- | A model using the given @f@ to store parameters of type @a@.
 --   Can be thought of as some kind of vector throughough this
@@ -15,7 +25,7 @@ type Model f a = f a
 
 -- | Compute the predicted value for
 --   the given model on the given observation
-compute :: (Applicative v, Foldable v, Num a)
+compute :: (ModelVector v, Applicative v, Foldable v, Num a)
         => Model v a -- ^ theta vector, the model's parameters
         -> v a       -- ^ @x@ vector, with the observed numbers
         -> a         -- ^ predicted @y@ for this observation
@@ -23,7 +33,7 @@ compute theta x = theta `dot` x
 {-# INLINE compute #-}
 
 -- | Cost function for a linear regression on a single observation
-cost :: (Applicative v, Foldable v, Floating a)
+cost :: (ModelVector v, Applicative v, Foldable v, Floating a)
      => Model v a -- ^ theta vector, the model's parameters
      -> v a       -- ^ @x@ vector
      -> a         -- ^ expected @y@ for the observation
@@ -32,13 +42,13 @@ cost theta x y = 0.5 * (y - compute theta x) ^ (2 :: Int)
 {-# INLINE cost #-}
 
 -- | Cost function for a linear regression on a set of observations
-totalCost :: (Applicative v, Foldable v, Applicative f, Foldable f, Floating a)
+totalCost :: (ModelVector f, ModelVector v, Applicative v, Foldable v, Applicative f, Foldable f, Floating a)
           => Model v a      -- ^ theta vector, the model's parameters
           -> f a            -- ^ expected @y@ value for each observation
           -> f (v a)        -- ^ input data for each observation
           -> a              -- ^ total cost over all observations
 totalCost theta ys xs =
-  let Acc n (Sum s) = foldMap acc $ liftA2 (cost theta) xs ys
+  let Acc n (Sum s) = foldMap acc $ fZipWith (cost theta) xs ys
   in s / fromIntegral n
 {-# INLINE totalCost #-}
 
@@ -76,7 +86,7 @@ totalCost theta ys xs =
 -- thetaApproxs :: [Model V.Vector Double]
 -- thetaApproxs = learnAll ys_ex xs_ex theta0
 -- @
-regress :: (Traversable v, Applicative v, Foldable v, Applicative f, Foldable f, Ord a, Floating a)
+regress :: (ModelVector f, ModelVector v, Traversable v, Applicative v, Foldable v, Applicative f, Foldable f, Ord a, Floating a)
         => f a         -- ^ expected @y@ value for each observation
         -> f (v a)     -- ^ input data for each observation
         -> Model v a   -- ^ initial parameters for the model, from which we'll improve
@@ -86,3 +96,34 @@ regress ys xs t0 =
   gradientDescent (\theta -> totalCost theta (fmap auto ys) (fmap (fmap auto) xs))
                   t0
 {-# INLINE regress #-}
+
+
+regressConjugate :: (ModelVector f, ModelVector v, Traversable v, Applicative v, Foldable v, Applicative f, Foldable f, Ord a, Floating a)
+        => f a         -- ^ expected @y@ value for each observation
+        -> f (v a)     -- ^ input data for each observation
+        -> Model v a   -- ^ initial parameters for the model, from which we'll improve
+        -> [Model v a] -- ^ a stream of increasingly accurate values
+                       --   for the model's parameter to better fit the observations.
+regressConjugate ys xs t0 =
+  conjugateGradientDescent (\theta -> totalCost theta (fmap auto ys) (fmap (fmap auto) xs))
+                  t0
+{-# INLINE regressConjugate #-}
+
+
+regressStochastic :: (ModelVector f, ModelVector v, Traversable v, Applicative v, Foldable v, Applicative f, Foldable f, Ord a, Floating a)
+        => f a         -- ^ expected @y@ value for each observation
+        -> f (v a)     -- ^ input data for each observation
+        -> Model v a   -- ^ initial parameters for the model, from which we'll improve
+        -> [Model v a] -- ^ a stream of increasingly accurate values
+                       --   for the model's parameter to better fit the observations.
+regressStochastic ys xs t0 =
+  stochasticGradientDescent (\(y, x) theta -> cost theta (fmap auto x) (auto y)) (zip (toList ys) (toList xs))
+                  t0
+{-# INLINE regressStochastic #-}
+
+
+-- f (Scalar a) -> f (Reverse s a) -> Reverse s a
+
+-- :: (v a, a)
+--           -> v (Numeric.AD.Internal.Reverse.Reverse s a)
+--           -> Numeric.AD.Internal.Reverse.Reverse s a
