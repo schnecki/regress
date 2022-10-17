@@ -6,13 +6,9 @@
 {-# LANGUAGE ScopedTypeVariables #-}
 module Numeric.Regression.Generic
   ( Model
-  , RegressionFunction (..)
-  , regressionNrCoefficients
   , cost
   , totalCost
-  , compute
   , regressOn
-  , regressOns
   ) where
 
 import           Control.Applicative
@@ -36,50 +32,27 @@ import           Unsafe.Coerce               (unsafeCoerce)
 --   package.
 type Model f a = f a
 
-
--- | Function to apply to the input.
-data RegressionFunction
-  = RegLinear -- ^ Linear regression.
-  | RegQuadratic -- ^ Quadratic regression.
-  deriving (Show, Eq, Ord, NFData, Generic, Serialize, Enum, Bounded)
-
-
-regressionNrCoefficients :: RegressionFunction -> Int -> Int
-regressionNrCoefficients RegLinear n    = n + 1
-regressionNrCoefficients RegQuadratic n = 2 * n + 1
-
-
--- | Compute the predicted value for
---   the given model on the given observation
-compute ::
-     (ModelVector v, Foldable v, Num a)
-  => RegressionFunction -- ^ Regression function
-  -> Model v a          -- ^ theta vector, the model's parameters
-  -> v a                -- ^ @x@ vector, with the observed numbers
-  -> a                  -- ^ predicted @y@ for this observation
-compute RegLinear theta x    = theta `dot` x
-compute RegQuadratic theta x = theta `dot` (x `fAppend` fMap (^2) x) -- TODO: all x1*x2 combinations + theta * x
-{-# INLINE compute #-}
-
+-- | Cost function taking theta and the input vector and returning a single floating point error value.
+type CostFunction = forall f a . (ModelVector f, Foldable f, Floating a) => f a -> f a -> a
 
 -- | Cost function for a linear regression on a single observation
 cost :: (ModelVector v, Foldable v, Floating a)
-     => RegressionFunction -- ^ Regression function: f(theta, xs).
-     -> Model v a          -- ^ Theta @t0@
-     -> v a                -- ^ @x@ vector
-     -> a                  -- ^ expected @y@ for the observation
-     -> a                  -- ^ cost
-cost regFun theta x y = 0.5 * (y - compute regFun theta x) ^ (2 :: Int)
+     => CostFunction -- ^ Cost function.
+     -> Model v a      -- ^ Theta @t0@
+     -> v a            -- ^ @x@ vector
+     -> a              -- ^ expected @y@ for the observation
+     -> a              -- ^ cost
+cost costFun theta x y = 0.5 * (y - costFun theta x) ^ (2 :: Int)
 {-# INLINE cost #-}
 
 
 -- | Cost function for a linear regression on a set of observations
 totalCost :: (ModelVector v, Foldable v, ModelVector f, Foldable f, Floating a)
-          => RegressionFunction -- ^ Regression function: f(theta, xs).
-          -> Model v a          -- ^ Theta @t0@
-          -> f a                -- ^ expected @y@ value for each observation
-          -> f (v a)            -- ^ input data for each observation
-          -> a                  -- ^ total cost over all observations
+          => CostFunction -- ^ Cost function.
+          -> Model v a      -- ^ Theta @t0@
+          -> f a            -- ^ expected @y@ value for each observation
+          -> f (v a)        -- ^ input data for each observation
+          -> a              -- ^ total cost over all observations
 totalCost regFun theta ys xs =
   let Acc n (Sum s) = foldMap acc $ fZipWith (cost regFun theta) xs ys
   in s / fromIntegral n
@@ -121,21 +94,21 @@ totalCost regFun theta ys xs =
 -- thetaApproxs = learnAll ys_ex xs_ex theta0
 -- @
 regressOn:: (ModelVector f, ModelVector v, Traversable v, Applicative f, Foldable f, Ord a, Floating a)
-        => RegressionFunction -- ^ Regression function: f(theta, xs).
-        -> f a                -- ^ expected @y@ value for each observation
-        -> f (v a)            -- ^ input data for each observation
-        -> Model v a          -- ^ initial parameters for the model, from which we'll improve
-        -> [Model v a]        -- ^ a stream of increasingly accurate values for the model's parameter to better fit the observations.
+        => CostFunction -- ^ Cost function.
+        -> f a            -- ^ expected @y@ value for each observation
+        -> f (v a)        -- ^ input data for each observation
+        -> Model v a      -- ^ initial parameters for the model, from which we'll improve
+        -> [Model v a]    -- ^ a stream of increasingly accurate values for the model's parameter to better fit the observations.
 regressOn regFun ys xs t0 =
   gradientDescent (\theta -> totalCost regFun theta (fmap auto ys) (fmap (fmap auto) xs)) t0
 
 
-regressOns:: (ModelVector f, ModelVector v, Traversable v, Applicative f, Foldable f, Ord a, Floating a)
-        => [RegressionFunction] -- ^ Regression function: f(theta, xs).
-        -> f a                -- ^ expected @y@ value for each observation
-        -> f (v a)            -- ^ input data for each observation
-        -> Model v a          -- ^ initial parameters for the model, from which we'll improve
-        -> [Model v a]        -- ^ a stream of increasingly accurate values for the model's parameter to better fit the observations.
-regressOns [] _ _ _ = error "regressOns: Empty regression function list"
-regressOns regFuns ys xs t0 =
-  gradientDescent (\theta -> (/ fromIntegral (length regFuns)) . sum $ map (\regFun -> totalCost regFun theta (fmap auto ys) (fmap (fmap auto) xs)) regFuns) t0
+-- regressOns:: (ModelVector f, ModelVector v, Traversable v, Applicative f, Foldable f, Ord a, Floating a)
+--         => [CostFunction] -- ^ Regression function: f(theta, xs).
+--         -> f a                -- ^ expected @y@ value for each observation
+--         -> f (v a)            -- ^ input data for each observation
+--         -> Model v a          -- ^ initial parameters for the model, from which we'll improve
+--         -> [Model v a]        -- ^ a stream of increasingly accurate values for the model's parameter to better fit the observations.
+-- regressOns [] _ _ _ = error "regressOns: Empty regression function list"
+-- regressOns costFuns ys xs t0 =
+--   gradientDescent (\theta -> (/ fromIntegral (length costFuns)) . sum $ map (\costFun -> totalCost costFun theta (fmap auto ys) (fmap (fmap auto) xs)) costFuns) t0

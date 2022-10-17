@@ -25,10 +25,9 @@ dot :: (ModelVector v, Foldable v, Num a)
     => v a
     -> v a
     -> a
-dot x y = (+y0) . getSum . foldMap Sum $ fZipWith (*) x y
-  where y0 | length x == length y + 1 = fLast x
-           | length y == length x + 1 = fLast y
-           | otherwise = error $ "dot: Unexpected length in multiplication: " ++ show (fLength x, fLength y)
+dot theta x = (+y0) . getSum . foldMap Sum $ fZipWith (*) theta x
+  where y0 | length theta == length x + 1 = fLast theta -- intercept
+           | otherwise = error $ "dot: Unexpected length in multiplication: " ++ show (fLength theta, fLength x) ++ ". Expected (n, n-1) for (theta, x)"
 
 
 class ModelVector f where
@@ -37,6 +36,9 @@ class ModelVector f where
   fLast :: f a -> a
   fAppend :: f a -> f a -> f a
   fMap :: (a -> a) -> f a -> f a
+  fTake :: Int -> f a -> f a
+  fInit :: f a -> f a
+  fSnoc :: f a -> a -> f a
 
 instance ModelVector [] where
   fZipWith = zipWith
@@ -44,6 +46,9 @@ instance ModelVector [] where
   fLast = last
   fAppend = (++)
   fMap = fmap
+  fTake = take
+  fInit = init
+  fSnoc xs = (xs ++) . pure
 
 instance ModelVector VB.Vector where
   fZipWith = VB.zipWith
@@ -51,6 +56,9 @@ instance ModelVector VB.Vector where
   fLast = VB.last
   fAppend = (VB.++)
   fMap = VB.map
+  fTake = VB.take
+  fInit = VB.init
+  fSnoc = VB.snoc
 
 -- instance ModelVector VU.Vector where
 --   -- type Constr VU.Vector = forall a . (a :: Type) -> VU.Unbox a
