@@ -17,18 +17,17 @@ logit :: Floating a => a -> a
 logit x = 1 / (1 + exp (negate x))
 {-# INLINE logit #-}
 
-logLikelihood :: (ModelVector v, Applicative v, Foldable v, Floating a)
+logLikelihood :: (ModelVector v, Foldable v, Floating a)
               => Model v a -- theta vector
               -> a         -- y
               -> v a       -- x vector (observation)
               -> a
-logLikelihood theta y x =
-  y * log (logit z) + (1 - y) * log (1 - logit z)
-
-  where z = theta `dot` x
+logLikelihood theta y x = y * log (logit z) + (1 - y) * log (1 - logit z)
+  where
+    z = theta `dot` x
 {-# INLINE logLikelihood #-}
 
-totalLogLikelihood :: (ModelVector v, Applicative v, Foldable v, Applicative f, Foldable f, Floating a)
+totalLogLikelihood :: (ModelVector v, ModelVector f, Foldable v, Foldable f, Floating a)
                    => a -- delta
                    -> Model v a
                    -> f a
@@ -37,7 +36,7 @@ totalLogLikelihood :: (ModelVector v, Applicative v, Foldable v, Applicative f, 
 totalLogLikelihood delta theta ys xs =
   (a - delta * b) / fromIntegral n
 
-  where Acc n (Sum a) = foldMap acc $ liftA2 (logLikelihood theta) ys xs
+  where Acc n (Sum a) = foldMap acc $ fZipWith (logLikelihood theta) ys xs
         b = (/2) . getSum $ foldMap (\x -> Sum (x^(2::Int))) theta
 {-# INLINE totalLogLikelihood #-}
 
@@ -70,7 +69,7 @@ totalLogLikelihood delta theta ys xs =
 -- approxs' :: [Model [] Double]
 -- approxs' = learn 0.1 ys_ex xs_ex t0
 -- @
-regress :: (ModelVector f, ModelVector v, Traversable v, Applicative v, Foldable f, Applicative f, Ord a, Floating a)
+regress :: (ModelVector f, ModelVector v, Traversable v, Foldable f, Applicative f, Ord a, Floating a)
         => a           -- ^ learning rate
         -> f a         -- ^ expect prediction for each observation
         -> f (v a)     -- ^ input data for each observation

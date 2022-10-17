@@ -18,17 +18,14 @@ extra-source-files:
 - README.md
 
 library:
-  exposed-modules:
-    - Numeric.Regression.Linear
-    - Numeric.Regression.Logistic
-  other-modules:
-    - Numeric.Regression.Internal
+  source-dirs: src
   dependencies:
     - base >=4.7 && <5
     - ad
     - vector
-
-  source-dirs: src
+    - reflection
+    - cereal
+    - deepseq
   ghc-options:
     - -O2
     - -Wall
