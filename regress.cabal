@@ -35,6 +35,7 @@ library
       ad
     , base >=4.7 && <5
     , cereal
+    , data-default
     , deepseq
     , reflection
     , vector

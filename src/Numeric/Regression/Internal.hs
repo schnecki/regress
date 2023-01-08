@@ -38,8 +38,11 @@ dot' theta x
 
 
 class ModelVector f where
+  fNull :: f a -> Bool
+  fReplicate :: Int -> a -> f a
   fIdx :: f a -> Int -> a
   fFromList :: [a] -> f a
+  fToList :: f a -> [a]
   fZipWith :: (a -> b -> c) -> f a -> f b -> f c
   fZipWith3 :: (a -> b -> c -> d) -> f a -> f b -> f c -> f d
   fLength :: f a -> Int
@@ -53,8 +56,11 @@ class ModelVector f where
   fConcatList :: [f a] -> f a
 
 instance ModelVector [] where
+  fNull = null
+  fReplicate = replicate
   fIdx = (!!)
   fFromList = id
+  fToList = id
   fZipWith = zipWith
   fZipWith3 = zipWith3
   fLength = length
@@ -68,8 +74,11 @@ instance ModelVector [] where
   fConcatList = concat
 
 instance ModelVector VB.Vector where
+  fNull = VB.null
+  fReplicate = VB.replicate
   fIdx = (VB.!)
   fFromList = VB.fromList
+  fToList = VB.toList
   fZipWith = VB.zipWith
   fZipWith3 = VB.zipWith3
   fLength = VB.length

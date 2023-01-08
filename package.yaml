@@ -26,6 +26,7 @@ library:
     - reflection
     - cereal
     - deepseq
+    - data-default
   ghc-options:
     - -O2
     - -Wall
