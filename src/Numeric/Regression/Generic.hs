@@ -199,7 +199,10 @@ data AdamState f a =
     , adamStM    :: f a
     , adamStV    :: f a
     }
-  deriving (Eq, Show, Generic, NFData, Serialize)
+  deriving (Eq, Generic, NFData, Serialize)
+
+instance Show (AdamState f a) where
+  show (AdamState nr _ _) = "AdamState step: " ++ show nr
 
 
 -- | The 'stochasticGradientDescentAdam' function approximates the true gradient of the constFunction by a gradient at a single example. In contrast to the stochastic gradient descent algorithm of the
