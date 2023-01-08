@@ -1,60 +1,58 @@
-{-# LANGUAGE DeriveAnyClass      #-}
-{-# LANGUAGE DeriveGeneric       #-}
+{-# LANGUAGE BangPatterns        #-}
 {-# LANGUAGE FlexibleContexts    #-}
-{-# LANGUAGE InstanceSigs        #-}
+{-# LANGUAGE GADTs               #-}
 {-# LANGUAGE RankNTypes          #-}
 {-# LANGUAGE ScopedTypeVariables #-}
 module Numeric.Regression.Generic
-  ( Model
-  , cost
+  ( ModelParameters
+  , InputVector
+  , ModelFunction
+  , Loss (..)
+  , LearningRate
   , totalCost
   , regressOn
+  , regressStochasticOn
+  , stochasticGradientDescentAvg
+  , dot
+  , dot'
   ) where
 
-import           Control.Applicative
-import           Control.DeepSeq
-import           Data.Dynamic
+import           Control.Arrow               (first)
 import           Data.Foldable
 import           Data.Monoid
 import           Data.Reflection
-import           Data.Serialize
-import           Data.Traversable
-import           GHC.Generics
 import           Numeric.AD                  hiding (grad, grad')
 import           Numeric.AD.Internal.Reverse
-import           Numeric.AD.Mode.Reverse
+import           Numeric.AD.Mode.Reverse     as Reverse (grad', gradWith, gradWith')
+
 import           Numeric.Regression.Internal
-import           Unsafe.Coerce               (unsafeCoerce)
+import           Numeric.Regression.Loss
 
+type LearningRate = Double
 
--- | A model using the given @f@ to store parameters of type @a@.
---   Can be thought of as some kind of vector throughough this
---   package.
-type Model f a = f a
+-- | A model using the given @f@ to store parameters of type @a@. Can be thought of as some kind of vector throughough this package.
+type ModelParameters f a = f a
 
--- | Cost function taking theta and the input vector and returning a single floating point error value.
-type CostFunction = forall f a . (ModelVector f, Foldable f, Floating a) => f a -> f a -> a
+-- | Input vector.
+type InputVector f a = f a
 
--- | Cost function for a linear regression on a single observation
-cost :: (ModelVector v, Foldable v, Floating a)
-     => CostFunction -- ^ Cost function.
-     -> Model v a      -- ^ Theta @t0@
-     -> v a            -- ^ @x@ vector
-     -> a              -- ^ expected @y@ for the observation
-     -> a              -- ^ cost
-cost costFun theta x y = 0.5 * (y - costFun theta x) ^ (2 :: Int)
-{-# INLINE cost #-}
+-- | Model function taking the parameters `theta` and the input vector `x` and returns @f(x | \theta)@.
+type ModelFunction
+   = forall f a. (ModelVector f, Foldable f, Floating a) =>
+                   ModelParameters f a -> InputVector f a -> a
 
 
 -- | Cost function for a linear regression on a set of observations
-totalCost :: (ModelVector v, Foldable v, ModelVector f, Foldable f, Floating a)
-          => CostFunction -- ^ Cost function.
-          -> Model v a      -- ^ Theta @t0@
-          -> f a            -- ^ expected @y@ value for each observation
-          -> f (v a)        -- ^ input data for each observation
-          -> a              -- ^ total cost over all observations
-totalCost regFun theta ys xs =
-  let Acc n (Sum s) = foldMap acc $ fZipWith (cost regFun theta) xs ys
+totalCost :: (ModelVector v, Foldable v, ModelVector f, Foldable f, Floating a, Mode a, Fractional (Scalar a))
+          => ModelFunction       -- ^ Model function computing @f(x | theta)@.
+          -> Loss                -- ^ Loss function.
+          -> ModelParameters v a -- ^ Theta @t0@
+          -> f a                 -- ^ expected @y@ value for each observation
+          -> f (InputVector v a) -- ^ input data for each observation
+          -> a                   -- ^ total cost over all observations
+totalCost modelFun loss theta ys xs =
+  -- let Acc n (Sum s) = foldMap acc $ fZipWith (errorFunction modelFun theta) xs ys
+  let Acc n (Sum s) = foldMap acc $ fZipWith (\y x -> getLossFun loss y (modelFun theta x)) ys xs
   in s / fromIntegral n
 {-# INLINE totalCost #-}
 
@@ -89,26 +87,67 @@ totalCost regFun theta ys xs =
 --   , (6, V.fromList [1, 1, 1])
 --   ]
 --
+-- compute :: (ModelVector v, Foldable v, Num a)
+--    -> Model v a          -- ^ theta vector, the model's parameters
+--    -> v a                -- ^ @x@ vector, with the observed numbers
+--    -> a                  -- ^ predicted @y@ for this observation
+-- compute theta x = theta `dot` x
+--
 -- -- stream of increasingly accurate parameters
 -- thetaApproxs :: [Model V.Vector Double]
--- thetaApproxs = learnAll ys_ex xs_ex theta0
+-- thetaApproxs = regressOn compute ys_ex xs_ex theta0
 -- @
 regressOn:: (ModelVector f, ModelVector v, Traversable v, Applicative f, Foldable f, Ord a, Floating a)
-        => CostFunction -- ^ Cost function.
-        -> f a            -- ^ expected @y@ value for each observation
-        -> f (v a)        -- ^ input data for each observation
-        -> Model v a      -- ^ initial parameters for the model, from which we'll improve
-        -> [Model v a]    -- ^ a stream of increasingly accurate values for the model's parameter to better fit the observations.
-regressOn regFun ys xs t0 =
-  gradientDescent (\theta -> totalCost regFun theta (fmap auto ys) (fmap (fmap auto) xs)) t0
+        => ModelFunction         -- ^ Model function to compute @f(x | t)@, where `t` are the model parameters @theta@.
+        -> Loss                  -- ^ Loss function.
+        -> f a                   -- ^ expected @y@ value for each observation
+        -> f (InputVector v a)   -- ^ input data for each observation
+        -> ModelParameters v a   -- ^ initial parameters for the model, from which we'll improve
+        -> [ModelParameters v a] -- ^ a stream of increasingly accurate values for the model's parameter to better fit the observations.
+regressOn modelFun loss ys xs t0 =
+  gradientDescent (\theta -> totalCost modelFun loss theta (fmap auto ys) (fmap (fmap auto) xs)) t0
+{-# INLINE regressOn #-}
+
+regressStochasticOn ::
+     (ModelVector v, Traversable v, Foldable f, Ord a, Floating a)
+  => ModelFunction         -- ^ Model function to compute @f(x | theta)@ with model parameters @theta@.
+  -> Loss                  -- ^ Loss function.
+  -> LearningRate          -- ^ Learning rate, e.g. 1e-3.
+  -> f a                   -- ^ expected @y@ value for each observation
+  -> f (InputVector v a)   -- ^ input data for each observation
+  -> ModelParameters v a   -- ^ initial parameters for the model, from which we'll improve
+  -> [ModelParameters v a] -- ^ a stream of increasingly accurate values for the model's parameter to better fit the observations.
+regressStochasticOn modelFun loss learnRate ys xs t0 =
+  stochasticGradientDescentAvg learnRate (\(y, x) theta -> getLossFun loss (auto y) (modelFun theta (fmap auto x))) (zip (toList ys) (toList xs)) t0
+{-# INLINE regressStochasticOn #-}
 
 
--- regressOns:: (ModelVector f, ModelVector v, Traversable v, Applicative f, Foldable f, Ord a, Floating a)
---         => [CostFunction] -- ^ Regression function: f(theta, xs).
---         -> f a                -- ^ expected @y@ value for each observation
---         -> f (v a)            -- ^ input data for each observation
---         -> Model v a          -- ^ initial parameters for the model, from which we'll improve
---         -> [Model v a]        -- ^ a stream of increasingly accurate values for the model's parameter to better fit the observations.
--- regressOns [] _ _ _ = error "regressOns: Empty regression function list"
--- regressOns costFuns ys xs t0 =
---   gradientDescent (\theta -> (/ fromIntegral (length costFuns)) . sum $ map (\costFun -> totalCost costFun theta (fmap auto ys) (fmap (fmap auto) xs)) costFuns) t0
+-- | The 'stochasticGradientDescentAvg' function approximates the true gradient of the constFunction by a gradient at a single example. In contrast to the stochastic gradient descent algorithm of the
+-- original AD package, this one cacluclates an average gradient over all examples and applies it to the model. Only one update is performed to prevent divergence, i.e. there will be at maximum one
+-- element in the list.
+--
+-- It uses reverse mode automatic differentiation to compute the gradient The learning rate is constant through out, and is set to 0.001
+stochasticGradientDescentAvg ::
+     forall f a e. (ModelVector f, Traversable f, Fractional a, Ord a)
+  => Double
+  -> (forall s. Reifies s Tape => e -> f (Reverse s a) -> Reverse s a)
+  -> [e]
+  -> f a
+  -> [f a]
+stochasticGradientDescentAvg learnRate errorSingle dataset t0 = go gradAvg0 (fromRational $ toRational learnRate)
+  where
+    xgxs0 :: [f (a, a)] -- for each example, for each parameter: gradient and tape
+    xgxs0 = fmap (\di -> Reverse.gradWith (,) (errorSingle di) t0) dataset
+    gradAvg0 :: f (a, a)
+    gradAvg0 = fMap (first (/ fromIntegral len)) $ foldl1 (fZipWith (\(a, b) (c, d) -> (a + c, b + d))) xgxs0
+    len = length dataset
+    go xgx !eta
+      | eta == 0 = []
+      | otherwise = [t1] -- : -- go gradAvg1 eta <- disabled as this causes divergence
+      where
+        t1 = fmap (\(xi, gxi) -> xi - eta * gxi) xgx
+        xgxs1 :: [f (a, a)] -- for each example, for each parameter: gradient and tape
+        xgxs1 = fmap (\di -> Reverse.gradWith (,) (errorSingle di) t1) dataset
+        gradAvg1 :: f (a, a)
+        gradAvg1 = fMap (first (/ fromIntegral len)) $ foldl1 (fZipWith (\(a, b) (c, d) -> (a + c, b + d))) xgxs1
+{-# INLINE stochasticGradientDescentAvg #-}

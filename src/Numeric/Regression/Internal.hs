@@ -4,7 +4,6 @@
 {-# LANGUAGE UndecidableInstances #-}
 module Numeric.Regression.Internal where
 
-import           Data.Kind
 import           Data.Monoid
 import qualified Data.Vector         as VB
 import qualified Data.Vector.Unboxed as VU
@@ -27,38 +26,61 @@ dot :: (ModelVector v, Foldable v, Num a)
     -> a
 dot theta x = (+y0) . getSum . foldMap Sum $ fZipWith (*) theta x
   where y0 | length theta == length x + 1 = fLast theta -- intercept
-           | otherwise = error $ "dot: Unexpected length in multiplication: " ++ show (fLength theta, fLength x) ++ ". Expected (n, n-1) for (theta, x)"
+           | otherwise = error $ "dot: Unexpected length in multiplication: " ++ show (fLength theta, fLength x) ++ ". Expected (n, n-1) for (theta, x). See also dot' for a version without intercept."
+
+dot' :: (ModelVector v, Foldable v, Num a)
+    => v a
+    -> v a
+    -> a
+dot' theta x
+  | length theta == length x = getSum . foldMap Sum $ fZipWith (*) theta x
+  | otherwise = error $ "dot': Unexpected length in multiplication: " ++ show (fLength theta, fLength x) ++ ". Expected (n, n) for (theta, x). See also dot for a version with intercept."
 
 
 class ModelVector f where
+  fIdx :: f a -> Int -> a
+  fFromList :: [a] -> f a
   fZipWith :: (a -> b -> c) -> f a -> f b -> f c
+  fZipWith3 :: (a -> b -> c -> d) -> f a -> f b -> f c -> f d
   fLength :: f a -> Int
   fLast :: f a -> a
   fAppend :: f a -> f a -> f a
   fMap :: (a -> a) -> f a -> f a
   fTake :: Int -> f a -> f a
+  fDrop :: Int -> f a -> f a
   fInit :: f a -> f a
   fSnoc :: f a -> a -> f a
+  fConcatList :: [f a] -> f a
 
 instance ModelVector [] where
+  fIdx = (!!)
+  fFromList = id
   fZipWith = zipWith
+  fZipWith3 = zipWith3
   fLength = length
   fLast = last
   fAppend = (++)
   fMap = fmap
   fTake = take
+  fDrop = drop
   fInit = init
   fSnoc xs = (xs ++) . pure
+  fConcatList = concat
 
 instance ModelVector VB.Vector where
+  fIdx = (VB.!)
+  fFromList = VB.fromList
   fZipWith = VB.zipWith
+  fZipWith3 = VB.zipWith3
   fLength = VB.length
   fLast = VB.last
   fAppend = (VB.++)
   fMap = VB.map
   fTake = VB.take
+  fDrop = VB.drop
   fInit = VB.init
   fSnoc = VB.snoc
+  fConcatList = VB.concat
 
 -- instance ModelVector VU.Vector where
 --   -- type Constr VU.Vector = forall a . (a :: Type) -> VU.Unbox a
