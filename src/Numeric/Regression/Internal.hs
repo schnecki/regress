@@ -4,6 +4,7 @@
 {-# LANGUAGE UndecidableInstances #-}
 module Numeric.Regression.Internal where
 
+import           Data.Maybe          (fromMaybe)
 import           Data.Monoid
 import qualified Data.Vector         as VB
 import qualified Data.Vector.Unboxed as VU
@@ -76,7 +77,7 @@ instance ModelVector [] where
 instance ModelVector VB.Vector where
   fNull = VB.null
   fReplicate = VB.replicate
-  fIdx = (VB.!)
+  fIdx vec idx = fromMaybe (error $ "Error in VB.! in model! Length Vector: " ++ show (VB.length vec) ++ " but vec VB.! " ++ show idx) (vec VB.!? idx)
   fFromList = VB.fromList
   fToList = VB.toList
   fZipWith = VB.zipWith
